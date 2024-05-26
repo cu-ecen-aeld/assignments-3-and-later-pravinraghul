@@ -2,6 +2,7 @@ CC = $(CROSS_COMPILE)gcc
 
 BUILD = .
 
+all: $(BUILD)/writer
 
 $(BUILD)/writer: $(BUILD)/writer.o
 	$(CC) $^ -o $@
