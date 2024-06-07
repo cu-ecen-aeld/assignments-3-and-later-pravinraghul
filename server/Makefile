@@ -5,7 +5,7 @@ BUILD = .
 all: $(BUILD)/aesdsocket
 
 $(BUILD)/aesdsocket: $(BUILD)/aesdsocket.o
-	$(CC) $^ -o $@
+	$(CC) $^ -o $@ -lpthread -lrt
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
