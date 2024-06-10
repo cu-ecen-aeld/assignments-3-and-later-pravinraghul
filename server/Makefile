@@ -1,11 +1,13 @@
-CC = $(CROSS_COMPILE)gcc
-CFLAGS = -g -Wall -Werror
-BUILD = .
+CC ?= $(CROSS_COMPILE)gcc
+CFLAGS ?= -g -Wall -Werror
+TARGET ?= aesdsocket
+LDFLAGS ?= -lpthread -lrt
+OBJECTS = aesdsocket.o
 
-all: $(BUILD)/aesdsocket
+all: $(TARGET)
 
-$(BUILD)/aesdsocket: $(BUILD)/aesdsocket.o
-	$(CC) $^ -o $@ -lpthread -lrt
+$(TARGET): $(OBJECTS)
+	$(CC) $^ -o $@ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
@@ -14,5 +16,5 @@ $(BUILD)/aesdsocket: $(BUILD)/aesdsocket.o
 .PHONY: clean
 
 clean:
-	rm -f $(BUILD)/aesdsocket.o
-	rm -f $(BUILD)/aesdsocket
+	rm -f $(OBJECTS) $(TARGET)
+
