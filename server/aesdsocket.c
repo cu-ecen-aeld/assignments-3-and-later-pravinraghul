@@ -18,8 +18,17 @@
 
 // socket data file macro
 #define PORT "9000"
-#define FILEPATH "/var/tmp/aesdsocketdata"
 #define BUFFERSIZE 1024
+
+#ifndef USE_AESD_CHAR_DEVICE
+#define USE_AESD_CHAR_DEVICE
+#endif
+
+#ifndef USE_AESD_CHAR_DEVICE
+#define FILEPATH "/var/tmp/aesdsocketdata"
+#else
+#define FILEPATH "/dev/aesdchar"
+#endif
 
 int sockfd;
 pthread_mutex_t mutex;
@@ -46,7 +55,9 @@ void signal_handler(int signal) {
   if (signal == SIGINT || signal == SIGTERM) {
     syslog(LOG_INFO, "Caught signal, exiting");
     close(sockfd);
+#ifndef USE_AESD_CHAR_DEVICE
     remove(FILEPATH);
+#endif
     syslog(LOG_INFO, "Closed server socket and deleted file %s", FILEPATH);
     exit(0);
   }
@@ -104,6 +115,8 @@ void thread_func(void *thread_param) {
   tparam->is_complete = true;
   syslog(LOG_INFO, "Closed connection from %s", inet_ntoa(tparam->client_addr.sin_addr));
 }
+
+#ifndef USE_AESD_CHAR_DEVICE
 
 static inline void timespec_add(struct timespec *result,
 				const struct timespec *ts_1,
@@ -168,7 +181,7 @@ void setup_timer(void) {
   }
 }
 
-
+#endif
 
 int main(int argc, char *argv[]) {
   int ret = 0;
@@ -262,7 +275,9 @@ int main(int argc, char *argv[]) {
     printf("running in daemon mode: process id : %d\n", getpid());
   }
 
+#ifndef USE_AESD_CHAR_DEVICE
   setup_timer();
+#endif
 
   // listening
   ret = listen(sockfd, 10);
