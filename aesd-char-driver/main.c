@@ -20,6 +20,7 @@
 #include <linux/slab.h>
 
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
@@ -77,7 +78,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     // update the values
     retval = size;
     *f_pos += size;
-    
+
  read_cleanup:
 	mutex_unlock(&device->mlock);
     return retval;
@@ -140,12 +141,103 @@ write_cleanup:
     return retval;
 }
 
+loff_t aesd_llseek(struct file* filp, loff_t offset, int whence)
+{
+    struct aesd_dev *device = filp->private_data;
+    struct aesd_buffer_entry *entry = NULL;
+    loff_t ret;
+    size_t size;
+    size_t i;
+
+    PDEBUG("Seek %llu bytes using whence %d", offset, whence);
+    if (mutex_lock_interruptible(&device->mlock))
+	return -ERESTARTSYS;
+
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &device->cbuffer, i) {
+        size += entry->size;
+    }
+
+    switch (whence) {
+    case 0:
+	ret = offset;
+	break;
+    case 1:
+	ret = filp->f_pos + offset;
+	break;
+    case 2:
+	ret = size + offset;
+	break;
+
+    default:
+        return -EINVAL;
+    }
+
+    if (ret < 0)
+        return -EINVAL;
+
+    filp->f_pos = ret;
+
+    mutex_unlock(&device->mlock);
+    return ret;
+}
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    int retval = 0;
+    size_t size = 0;
+
+    struct aesd_seekto seekto;
+    struct aesd_dev *device;
+    uint8_t i;
+    struct aesd_buffer_entry *entry = NULL;
+
+    device = filp->private_data;
+    if (mutex_lock_interruptible(&device->mlock))
+        return -ERESTARTSYS;
+
+    if (arg == 0) {
+        return -EFAULT;
+    } else {
+	retval =
+	    copy_from_user(&seekto, (void *)arg, sizeof(struct aesd_seekto));
+        if (retval) {
+            retval = -EFAULT;
+            goto cleanup;
+        }
+    }
+
+    if (cmd == AESDCHAR_IOCSEEKTO) {
+        if (seekto.write_cmd > 9)
+            return -EINVAL;
+
+        if (seekto.write_cmd_offset >= device->cbuffer.entry[seekto.write_cmd].size)
+            return -EINVAL;
+
+	PDEBUG("ioctl: AESDCHAR_IOCSEEKTO with offset %d", seekto.write_cmd_offset);
+        AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.cbuffer, i) {
+            if (i < seekto.write_cmd) {
+                size += entry->size;
+            } else {
+                size += seekto.write_cmd_offset;
+                break;
+            }
+        }
+        filp->f_pos = size;
+    }
+
+cleanup:
+    mutex_unlock(&device->mlock);
+    return retval;
+}
+
 struct file_operations aesd_fops = {
-    .owner =    THIS_MODULE,
-    .read =     aesd_read,
-    .write =    aesd_write,
-    .open =     aesd_open,
-    .release =  aesd_release,
+    .owner =           THIS_MODULE,
+    .read =            aesd_read,
+    .write =           aesd_write,
+    .open =            aesd_open,
+    .release =         aesd_release,
+    .llseek =          aesd_llseek,
+    .unlocked_ioctl =  aesd_ioctl
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
@@ -193,7 +285,7 @@ void aesd_cleanup_module(void)
     int index;
     struct aesd_buffer_entry *entry;
     dev_t devno = MKDEV(aesd_major, aesd_minor);
-  
+
     AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.cbuffer, index) {
 	kfree(entry->buffptr);
     }

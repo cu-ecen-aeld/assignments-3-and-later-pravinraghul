@@ -16,6 +16,9 @@
 #include <time.h>
 #include "queue.h"
 
+#include <sys/ioctl.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
+
 // socket data file macro
 #define PORT "9000"
 #define BUFFERSIZE 1024
@@ -29,6 +32,9 @@
 #else
 #define FILEPATH "/dev/aesdchar"
 #endif
+
+// ioctl command
+#define IOCTL_CMD "AESDCHAR_IOCSEEKTO"
 
 int sockfd;
 pthread_mutex_t mutex;
@@ -49,15 +55,12 @@ struct slist_data_s {
 
 // singly linked list initialization
 
-
 // Signal handler
 void signal_handler(int signal) {
   if (signal == SIGINT || signal == SIGTERM) {
     syslog(LOG_INFO, "Caught signal, exiting");
     close(sockfd);
-#ifndef USE_AESD_CHAR_DEVICE
-    remove(FILEPATH);
-#endif
+    // remove(FILEPATH);
     syslog(LOG_INFO, "Closed server socket and deleted file %s", FILEPATH);
     exit(0);
   }
@@ -75,8 +78,7 @@ void thread_func(void *thread_param) {
   // mutex lock
   pthread_mutex_lock(&mutex);
 
-  // write the data to the file
-  file = fopen(FILEPATH, "a");
+  file = fopen(FILEPATH, "w+");
   if (file == NULL) {
     perror("fopen failed");
     closelog();
@@ -87,28 +89,27 @@ void thread_func(void *thread_param) {
   }
 
   while ((bytes_recv = recv(tparam->client_sockfd, buffer, BUFFERSIZE, 0)) > 0) {
-    fwrite(buffer, 1, bytes_recv, file);
-    if (buffer[bytes_recv - 1] == '\n')
+    if (memchr(buffer, '\n', bytes_recv) != NULL) {
+      if (strstr(buffer, "AESDCHAR_IOCSEEKTO") != NULL) {
+	syslog(LOG_INFO, "IOCTL command found");
+	struct aesd_seekto seekto;
+	sscanf(buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset);
+	syslog(LOG_INFO,"Command %u,%u", seekto.write_cmd, seekto.write_cmd_offset);
+	ioctl(fileno(file),AESDCHAR_IOCSEEKTO, &seekto);
+      } else {
+	syslog(LOG_INFO, "Normal data received");
+	fwrite(buffer, 1, bytes_recv, file);
+      }
       break;
+    }
   }
+  char newbuffer[BUFFERSIZE] = {0};
+  
+  while (read(fileno(file), newbuffer, 1) > 0) {
+    send(tparam->client_sockfd, newbuffer, strlen(newbuffer), 0);
+  }
+
   fclose(file);
-
-  // read the data from the file
-  file = fopen(FILEPATH, "r");
-  if (file == NULL) {
-    perror("fopen failed");
-    closelog();
-    close(tparam->client_sockfd);
-    close(sockfd);
-    return;
-  }
-
-  while (fgets(buffer, BUFFERSIZE, file) != NULL) {
-    send(tparam->client_sockfd, buffer, strlen(buffer), 0);
-  }
-  fclose(file);
-
-  // mutex unlock
   pthread_mutex_unlock(&mutex);
 
   close(tparam->client_sockfd);
